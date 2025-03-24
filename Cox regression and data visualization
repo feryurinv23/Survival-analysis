@@ -6,106 +6,152 @@ library(RegParallel)
 # Set the random seed for reproducibility
 set.seed(2025.1)
 
-# Perform parallel Cox regression analysis using RegParallel function
+# Parallelized Cox Proportional Hazards Regression
+# Regressão de Cox Paralelizada
+# -----------------------------------------------
+# Uses RegParallel to test association between each gene and survival
+# Usa RegParallel para testar associação entre cada gene e sobrevivência
 res <- RegParallel(
-  data = data_a,  # Define the dataset used for regression (data_a)
-  formula = 'Surv(time = time, event = event) ~ `[*]`',  # Cox model with one predictor variable at a time
-  FUN = function(formula, data_a)  # Define the function to run the Cox regression
-    coxph(formula = formula,  # Fit Cox proportional hazards model
-          data = data_a,  # Use the data provided
-          ties = 'breslow',  # Handle tied event times using Breslow's method
-          singular.ok = TRUE),  # Allow singularity in the model (handling collinearity issues)
-  FUNtype = 'coxph',  # Specify that the function used is 'coxph' (Cox regression)
-  variables = colnames(data_a)[c(3:ncol(data_a))],  # Select the independent variables to test (from column 4 onwards)
-  cores = 6,  # Use 6 processor cores for parallelization
-  blocksize = 2000,  # Process 2000 variables per block (improves performance)
-  nestedParallel = FALSE,  # Do not use nested parallelism (avoids system overload)
-  conflevel = 95  # Set confidence level to 95%
+  data = data_a,  # Input dataset (clinical + genomic data)
+                  # Dados de entrada (clínicos + genômicos)
+  formula = 'Surv(time = time, event = event) ~ `[*]`',  # Cox model template
+                                                        # Modelo de Cox com placeholder
+  FUN = function(formula, data_a)
+    coxph(formula = formula,
+          data = data_a,
+          ties = 'breslow',  # Method for handling tied events
+                            # Método para eventos concorrentes
+          singular.ok = TRUE),  # Allows singular fits
+                               # Permite ajustes singulares
+  FUNtype = 'coxph',  # Specifies analysis type
+                     # Tipo de análise
+  variables = colnames(data_a)[6:ncol(data_a)],  # Selects genes (columns 6+)
+                                               # Seleciona genes (colunas 6+)
+  cores = 6,  # Number of CPU cores for parallel processing
+             # Núcleos de CPU para processamento paralelo
+  blocksize = 2000,  # Genes processed per block
+                    # Genes processados por bloco
+  nestedParallel = FALSE,  # Disables nested parallelism
+                          # Desativa paralelismo aninhado
+  conflevel = 95  # Confidence interval level
+                 # Nível do intervalo de confiança
 )
 
-# Adjust p-values from the LogRank test using Benjamini-Hochberg method for multiple testing correction
-res$LogRank_adj <- p.adjust(res$LogRank, method = 'BH')
+# Multiple Testing Correction
+# Correção para Múltiplos Testes
+# -----------------------------------------------
+res$p_adj <- p.adjust(res$P, method = 'BH')  # Benjamini-Hochberg FDR adjustment
+                                            # Ajuste FDR de Benjamini-Hochberg
+res_sig <- res[res$P < 0.01,]  # Filters significant results (raw p < 0.01)
+                              # Filtra resultados significativos (p < 0.01)
 
-# Subset results to include only significant variables (adjusted p-value < 0.01)
-res_sig <- res[res$LogRank_adj < 0.01,]
-
-# Save the significant results to an Excel file
+# Save significant results to Excel
+# Salva resultados significativos em Excel
 openxlsx::write.xlsx(res_sig, "~/Documents/MBA/TCC/Resultados/regression_results.xlsx")
 
-#### Data visualization -------
-# The value of Beta indicates the direction and strength of the association between the variable and the risk.
-# A positive Beta suggests that the variable increases the risk (hazard),
-# while a negative Beta suggests that the variable is associated with a lower risk.
+# Beta coefficients indicate direction/strength of association:
+# Os coeficientes Beta indicam direção/força da associação:
+# - Positive Beta: Higher expression → increased risk (hazard)
+#   Beta positivo: Maior expressão → maior risco
+# - Negative Beta: Higher expression → decreased risk
+#   Beta negativo: Maior expressão → menor risco
 
-# Create a bar plot for Beta coefficients from the Cox regression model
-p1 <- ggplot(res_sig, aes(x = reorder(Variable, Beta), y = Beta)) +
-  geom_bar(stat = 'identity', fill = '#2973B2') +  # Bar plot with Beta coefficients
-  geom_errorbar(aes(ymin = Beta - StandardError, ymax = Beta + StandardError), 
-                width = 0.2, color = 'black') +  # Adding error bars
-  coord_flip() +  # Flip the coordinates for better visualization
-  labs(title = "Beta Coefficients from Cox Regression Model", 
-       x = "Variables", 
+# Forest Plot of Hazard Ratios (Top 20 Genes)
+# Gráfico de Floresta para Razões de Risco (Top 20 Genes)
+# -----------------------------------------------
+top_genes <- head(res_sig, 20)  # Selects top 20 significant genes
+                               # Seleciona os 20 genes mais significativos
+
+p <- ggplot(top_genes, aes(x = reorder(Variable, HR), y = HR)) +
+  geom_point(color = "red", size = 3) +  # HR points
+                                       # Pontos de HR
+  geom_errorbar(aes(ymin = HRlower, ymax = HRupper),  # 95% CI
+                                                     # IC 95%
+  width = 0.2, color = "royalblue") +  
+  geom_vline(xintercept = 1, linetype = "dashed") +  # Reference line (HR=1)
+                                                   # Linha de referência (HR=1)
+  coord_flip() +  # Horizontal orientation
+                # Orientação horizontal
+  theme_bw() +  # Clean background
+              # Fundo limpo
+  labs(x = "", y = "Hazard Ratio") +
+  theme(axis.text = element_text(size = 20),  # Large font sizes
+        axis.title = element_text(size = 20)) # Para melhor legibilidade
+
+# Export high-resolution plot
+# Exporta gráfico em alta resolução
+png("florest plot cancer.png", width = 3500, height = 3000, res = 300, bg = "transparent")
+print(p)
+dev.off()
+
+# Significant Results Table (Top 20)
+# Tabela de Resultados Significativos (Top 20)
+# -----------------------------------------------
+res_table <- res_sig %>%
+  filter(P < 0.05) %>%
+  dplyr::select(Variable, P, HR) %>%
+  arrange(P) %>%  # Sort by p-value
+                # Ordena por valor-p
+  head(20)
+
+table_plot <- ggtexttable(
+  res_table,
+  theme = ttheme("light")  # Light-themed table
+                          # Tabela com tema claro
+)
+
+png("table sig cancer.png", width = 2000, height = 2000, res = 300)
+print(table_plot)
+dev.off()
+
+# Beta Coefficient Plot
+# Gráfico de Coeficientes Beta
+# -----------------------------------------------
+p1 <- ggplot(top_genes, aes(x = reorder(Variable, Beta), y = Beta)) +
+  geom_bar(stat = 'identity', fill = '#2973B2') +  # Blue bars
+                                                 # Barras azuis
+  geom_errorbar(aes(ymin = Beta - StandardError,  # Error bars
+                  ymax = Beta + StandardError),   # Barras de erro
+  width = 0.2, color = 'black') +  
+  coord_flip() +
+  labs(title = "Cox Regression Beta Coefficients",
+       x = "Genes", 
        y = "Beta Value") +
-  theme_bw() + theme(axis.text.x = element_text(size = 20), 
-                     axis.text.y = element_text(size = 20),
-                     axis.title.x = element_text(size = 20),
-                     axis.title.y = element_text(size = 20),
-                     title = element_text(size = 20))
+  theme_bw() + 
+  theme(text = element_text(size = 20))  # Uniform font size
+                                       # Tamanho de fonte uniforme
 
-# Save the plot as a PNG file
-png("Beta Coefficients.png", width = 3500,
-    height = 3000, units = "px", res = 300, bg = "transparent")
-p1
+png("Coeficientes Beta.png", width = 3500, height = 3000, res = 300)
+print(p1)
 dev.off()
 
-# The Hazard Ratio (HR) quantifies the change in risk associated with a one-unit increase in the variable.
-# An HR > 1 suggests that the variable increases the risk, while an HR < 1 suggests a reduction in risk.
+# Hazard Ratio (HR) Interpretation:
+# Interpretação da Razão de Risco (HR):
+# - HR > 1: Variable increases risk
+#   Variável aumenta o risco
+# - HR < 1: Variable decreases risk
+#   Variável diminui o risco
 
-# Create a bar plot for Hazard Ratios (HR) from the Cox regression model
-p2 <- ggplot(res_sig, aes(x = reorder(Variable, HR), y = HR)) +
-  geom_bar(stat = 'identity', fill = '#48A6A7') +  # Bar plot for HR
-  geom_errorbar(aes(ymin = HR - StandardError, ymax = HR + StandardError), 
-                width = 0.2, color = 'black') +  # Adding error bars
-  coord_flip() +  # Flip the coordinates for better visualization
-  labs(title = "Hazard Ratios (HR) from Cox Regression Model", 
-       x = "Variables", 
-       y = "Hazard Ratio (HR)") +
-  theme_bw() + theme(axis.text.x = element_text(size = 20), 
-                     axis.text.y = element_text(size = 20),
-                     axis.title.x = element_text(size = 20),
-                     axis.title.y = element_text(size = 20),
-                     title = element_text(size = 20))
+# Hazard Ratio Bar Plot
+# Gráfico de Barras para Razão de Risco
+# -----------------------------------------------
+p2 <- ggplot(top_genes, aes(x = reorder(Variable, HR), y = HR)) +
+  geom_bar(stat = 'identity', fill = '#48A6A7') +  # Teal bars
+                                                 # Barras verdes-azuladas
+  geom_errorbar(aes(ymin = HR - StandardError,    # Error bars
+                  ymax = HR + StandardError),    # Barras de erro
+  width = 0.2, color = 'black') +
+  coord_flip() +
+  labs(title = "Cox Hazard Ratios (HR)",
+       x = "", 
+       y = "Hazard Ratio") +
+  theme_bw() +
+  theme(text = element_text(size = 20))
 
-# Save the HR plot as a PNG file
-png("Hazard Ratio (HR).png", width = 3500,
-    height = 3000, units = "px", res = 300, bg = "transparent")
-p2
+png("Razão de Risco (HR).png", width = 3500, height = 3000, res = 300)
+print(p2)
 dev.off()
-
-
-##### Survival Analysis ------------------------------------------------------
-
-# Define the gene of interest for survival analysis
-gene <- "LHX5"  # Replace with the gene you wish to analyze
-
-# Create a new column for time in months and categorize samples based on gene expression
-data_a <- data_a %>%
-  mutate(months = time / 30,  # Convert time to months
-         Gene_Group = ifelse(.data[[gene]] > median(.data[[gene]], na.rm = TRUE), "High", "Low"))
-
-# Create the Kaplan-Meier survival model based on the new 'Gene_Group' variable
-fit <- survfit(Surv(months, event) ~ Gene_Group, data = data_a)
-
-# Generate the Kaplan-Meier plot
-ggsurvplot(fit, data = data_a, 
-           pval = TRUE, 
-           conf.int = TRUE, 
-           risk.table = TRUE, 
-           ggtheme = theme_classic(),
-           palette = c("red", "green"),
-           legend.labs = c("Low expression", "High expression"),
-           xlab = "Time (months)", ylab = "Survival Probability")
-
+   
 
 
 
