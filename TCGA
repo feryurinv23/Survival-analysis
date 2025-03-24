@@ -31,7 +31,7 @@ XenaData <- subset(XenaData, subset = DataSubtype == "gene expression RNAseq")
 # Apply additional filtering to the gene expression data (LAML cohort and survival data)
 filtered = XenaFilter(GeneExpectedCnt_toil,
                       filterCohorts = "TCGA Acute Myeloid Leukemia (LAML)", 
-                      filterDatasets = "survival/LAML_survival.txt")
+                      filterDatasets = "survival/LAML_survival.txt") # "TCGA.DLBC.sampleMap/HiSeqV2" / TCGA.DLBC.sampleMap/DLBC_clinicalMatrix / survival/DLBC_survival.txt
 
 # Query the filtered data and download it
 XenaQuery(filtered) |> XenaDownload(destdir = "./")
@@ -40,24 +40,39 @@ XenaQuery(filtered) |> XenaDownload(destdir = "./")
 # LAML <- read.delim("~/Documents/MBA/TCC/TCGA.LAML.sampleMap/HiSeqV2", row.names=1)
 # mdata <- read.delim("survival/LAML_survival.txt")
 
-# Create a dataframe to hold sample names and values (initially NA)
+# Create a data frame 'samples_LAML' with two columns: 'sample' (column names of LAML) and 'value' (initialized to NA)
 samples_LAML <- data.frame("sample" = colnames(LAML),
                            "value" = NA)
 
-# Clean up the sample identifiers in the survival data (replace "-" with ".")
+# Replace hyphens with dots in the 'sample' column of 'mdata'
 mdata$sample <- gsub("-", ".", mdata$sample)
 
-# Merge the sample data with survival data based on the sample identifier
+# Replace hyphens with dots in the 'X_INTEGRATION' column of 'clinical'
+clinical$X_INTEGRATION <- gsub("-", ".", clinical$X_INTEGRATION)
+
+# Merge 'samples_LAML' with 'mdata' by the 'sample' column
 mdata <- merge(samples_LAML, mdata, by = "sample")
+  
+# Subset 'mdata' to include only the first, fourth, and fifth columns
+mdata <- mdata[, c(1, 4, 5)]
 
-# Subset mdata to keep relevant columns (sample, OS.time, and OS)
-mdata <- mdata[,c(1,4,5)]
+# Rename the first column of 'clinical' to 'sample'
+names(clinical)[1] <- "sample"
 
-# Prepare a dataframe for survival analysis with time, event, and patient ID
+# Merge 'samples_LAML' with 'clinical' by the 'sample' column
+clinical <- merge(samples_LAML, clinical, by = "sample")
+
+# Subset 'clinical' to include columns 1, 7, 15, and 36
+clinical <- clinical[, c(1, 7, 15, 36)]
+
+# Create a new data frame 'survival.data' containing survival-related information
 survival.data <- data.frame(
   time = mdata$OS.time,  # Survival time
-  event = mdata$OS,  # Event indicator (alive=0; dead=1)
-  Id = mdata$sample  # Unique patient identifier
+  event = mdata$OS,  # Censoring indicator (alive=0; dead=1)
+  Id = mdata$sample, # Unique patient identifier
+  age = clinical$age_at_initial_pathologic_diagnosis,  # Age at initial diagnosis
+  gender = clinical$gender,  # Gender of the patient
+  stage = clinical$clinical_stage  # Clinical stage at diagnosis
 )
 
 # Transpose the gene expression data
