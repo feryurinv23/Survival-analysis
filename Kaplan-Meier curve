@@ -1,3 +1,6 @@
+library(survival)
+library(survminer) 
+
 # Survival Analysis for MET Gene Expression
 # Análise de Sobrevivência para Expressão do Gene MET
 # --------------------------------------------------
