@@ -1,0 +1,111 @@
+library(ggplot2)
+library(survival)
+library(survminer) 
+library(RegParallel)
+
+# Set the random seed for reproducibility
+set.seed(2025.1)
+
+# Perform parallel Cox regression analysis using RegParallel function
+res <- RegParallel(
+  data = data_a,  # Define the dataset used for regression (data_a)
+  formula = 'Surv(time = time, event = event) ~ `[*]`',  # Cox model with one predictor variable at a time
+  FUN = function(formula, data_a)  # Define the function to run the Cox regression
+    coxph(formula = formula,  # Fit Cox proportional hazards model
+          data = data_a,  # Use the data provided
+          ties = 'breslow',  # Handle tied event times using Breslow's method
+          singular.ok = TRUE),  # Allow singularity in the model (handling collinearity issues)
+  FUNtype = 'coxph',  # Specify that the function used is 'coxph' (Cox regression)
+  variables = colnames(data_a)[c(3:ncol(data_a))],  # Select the independent variables to test (from column 4 onwards)
+  cores = 6,  # Use 6 processor cores for parallelization
+  blocksize = 2000,  # Process 2000 variables per block (improves performance)
+  nestedParallel = FALSE,  # Do not use nested parallelism (avoids system overload)
+  conflevel = 95  # Set confidence level to 95%
+)
+
+# Adjust p-values from the LogRank test using Benjamini-Hochberg method for multiple testing correction
+res$LogRank_adj <- p.adjust(res$LogRank, method = 'BH')
+
+# Subset results to include only significant variables (adjusted p-value < 0.01)
+res_sig <- res[res$LogRank_adj < 0.01,]
+
+# Save the significant results to an Excel file
+openxlsx::write.xlsx(res_sig, "~/Documents/MBA/TCC/Resultados/regression_results.xlsx")
+
+#### Data visualization -------
+# The value of Beta indicates the direction and strength of the association between the variable and the risk.
+# A positive Beta suggests that the variable increases the risk (hazard),
+# while a negative Beta suggests that the variable is associated with a lower risk.
+
+# Create a bar plot for Beta coefficients from the Cox regression model
+p1 <- ggplot(res_sig, aes(x = reorder(Variable, Beta), y = Beta)) +
+  geom_bar(stat = 'identity', fill = '#2973B2') +  # Bar plot with Beta coefficients
+  geom_errorbar(aes(ymin = Beta - StandardError, ymax = Beta + StandardError), 
+                width = 0.2, color = 'black') +  # Adding error bars
+  coord_flip() +  # Flip the coordinates for better visualization
+  labs(title = "Beta Coefficients from Cox Regression Model", 
+       x = "Variables", 
+       y = "Beta Value") +
+  theme_bw() + theme(axis.text.x = element_text(size = 20), 
+                     axis.text.y = element_text(size = 20),
+                     axis.title.x = element_text(size = 20),
+                     axis.title.y = element_text(size = 20),
+                     title = element_text(size = 20))
+
+# Save the plot as a PNG file
+png("Beta Coefficients.png", width = 3500,
+    height = 3000, units = "px", res = 300, bg = "transparent")
+p1
+dev.off()
+
+# The Hazard Ratio (HR) quantifies the change in risk associated with a one-unit increase in the variable.
+# An HR > 1 suggests that the variable increases the risk, while an HR < 1 suggests a reduction in risk.
+
+# Create a bar plot for Hazard Ratios (HR) from the Cox regression model
+p2 <- ggplot(res_sig, aes(x = reorder(Variable, HR), y = HR)) +
+  geom_bar(stat = 'identity', fill = '#48A6A7') +  # Bar plot for HR
+  geom_errorbar(aes(ymin = HR - StandardError, ymax = HR + StandardError), 
+                width = 0.2, color = 'black') +  # Adding error bars
+  coord_flip() +  # Flip the coordinates for better visualization
+  labs(title = "Hazard Ratios (HR) from Cox Regression Model", 
+       x = "Variables", 
+       y = "Hazard Ratio (HR)") +
+  theme_bw() + theme(axis.text.x = element_text(size = 20), 
+                     axis.text.y = element_text(size = 20),
+                     axis.title.x = element_text(size = 20),
+                     axis.title.y = element_text(size = 20),
+                     title = element_text(size = 20))
+
+# Save the HR plot as a PNG file
+png("Hazard Ratio (HR).png", width = 3500,
+    height = 3000, units = "px", res = 300, bg = "transparent")
+p2
+dev.off()
+
+
+##### Survival Analysis ------------------------------------------------------
+
+# Define the gene of interest for survival analysis
+gene <- "LHX5"  # Replace with the gene you wish to analyze
+
+# Create a new column for time in months and categorize samples based on gene expression
+data_a <- data_a %>%
+  mutate(months = time / 30,  # Convert time to months
+         Gene_Group = ifelse(.data[[gene]] > median(.data[[gene]], na.rm = TRUE), "High", "Low"))
+
+# Create the Kaplan-Meier survival model based on the new 'Gene_Group' variable
+fit <- survfit(Surv(months, event) ~ Gene_Group, data = data_a)
+
+# Generate the Kaplan-Meier plot
+ggsurvplot(fit, data = data_a, 
+           pval = TRUE, 
+           conf.int = TRUE, 
+           risk.table = TRUE, 
+           ggtheme = theme_classic(),
+           palette = c("red", "green"),
+           legend.labs = c("Low expression", "High expression"),
+           xlab = "Time (months)", ylab = "Survival Probability")
+
+
+
+
