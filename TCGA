@@ -1,0 +1,77 @@
+library(UCSCXenaTools)
+library(dplyr)
+
+# Load the Xena data package
+data(XenaData)
+
+# Set the working directory for saving files
+setwd("~/Documents/MBA/TCC/")
+
+# Save the XenaData as a CSV file
+write.csv(XenaData, "00_tblXenaHubInfo.csv")
+
+# Subset XenaData to include specific columns
+XenaData <- XenaData[,c(2,3,4,6,9,12,16,10)]
+
+# View the XenaData for inspection
+View(XenaData)
+
+# Check unique values in the 'XenaCohorts' column
+unique(XenaData$XenaCohorts)
+
+# Filter XenaData for specific cohort (TCGA Acute Myeloid Leukemia - LAML)
+XenaData <- subset(XenaData, subset = XenaCohorts == "TCGA Acute Myeloid Leukemia (LAML)")
+
+# Generate gene expression data (RNAseq) for the 'tcgaHub'
+GeneExpectedCnt_toil = XenaGenerate(subset = XenaHostNames == "tcgaHub")
+
+# Filter the data to only include gene expression (RNAseq) for the selected cohort
+XenaData <- subset(XenaData, subset = DataSubtype == "gene expression RNAseq")
+
+# Apply additional filtering to the gene expression data (LAML cohort and survival data)
+filtered = XenaFilter(GeneExpectedCnt_toil,
+                      filterCohorts = "TCGA Acute Myeloid Leukemia (LAML)", 
+                      filterDatasets = "survival/LAML_survival.txt")
+
+# Query the filtered data and download it
+XenaQuery(filtered) |> XenaDownload(destdir = "./")
+
+# Uncomment these lines if you need to read in survival data and gene expression data (LAML)
+# LAML <- read.delim("~/Documents/MBA/TCC/TCGA.LAML.sampleMap/HiSeqV2", row.names=1)
+# mdata <- read.delim("survival/LAML_survival.txt")
+
+# Create a dataframe to hold sample names and values (initially NA)
+samples_LAML <- data.frame("sample" = colnames(LAML),
+                           "value" = NA)
+
+# Clean up the sample identifiers in the survival data (replace "-" with ".")
+mdata$sample <- gsub("-", ".", mdata$sample)
+
+# Merge the sample data with survival data based on the sample identifier
+mdata <- merge(samples_LAML, mdata, by = "sample")
+
+# Subset mdata to keep relevant columns (sample, OS.time, and OS)
+mdata <- mdata[,c(1,4,5)]
+
+# Prepare a dataframe for survival analysis with time, event, and patient ID
+survival.data <- data.frame(
+  time = mdata$OS.time,  # Survival time
+  event = mdata$OS,  # Event indicator (alive=0; dead=1)
+  Id = mdata$sample  # Unique patient identifier
+)
+
+# Transpose the gene expression data
+LAML_t <- data.frame(t(LAML))
+
+# Add patient identifiers as row names in the transposed data
+LAML_t$Id <- rownames(LAML_t)
+
+# Clean up the patient IDs in the survival data (replace "-" with ".")
+survival.data$Id <- gsub("-", ".", survival.data$Id)
+
+# Merge the survival data with gene expression data on the 'Id' column
+data_a <- merge(survival.data, LAML_t, by = "Id")
+
+# Set the rownames of the merged data to the patient IDs and remove the 'Id' column
+rownames(data_a) <- data_a$Id
+data_a <- data_a[,-1]
