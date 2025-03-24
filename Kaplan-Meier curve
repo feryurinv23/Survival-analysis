@@ -1,0 +1,98 @@
+# Survival Analysis for MET Gene Expression
+# Análise de Sobrevivência para Expressão do Gene MET
+# --------------------------------------------------
+
+# Define target gene / Definir gene alvo
+# --------------------------------------------------
+gene <- "MET"  # Oncogene associated with cancer progression
+              # Oncogene associado com progressão do câncer
+
+# Create expression groups / Criar grupos de expressão
+# --------------------------------------------------
+# Extract expression values for MET gene
+# Extrai valores de expressão para o gene MET
+data_a$Gene_Exp <- data_a[, gene]  
+
+# Create High/Low groups based on median expression
+# Cria grupos Alto/Baixo baseado na mediana de expressão
+data_a$Gene_Group <- ifelse(
+  data_a$Gene_Exp > median(data_a$Gene_Exp, na.rm = TRUE),
+  "High",  # Above median / Acima da mediana
+  "Low"    # Below median / Abaixo da mediana
+)
+
+# Convert to factor with proper level ordering
+# Converte para fator com ordem correta de níveis
+data_a$Gene_Group <- factor(data_a$Gene_Group, 
+                           levels = c("Low", "High"))  # Low first for reference
+                                                     # Baixo primeiro como referência
+
+# Kaplan-Meier Survival Analysis
+# Análise de Sobrevivência de Kaplan-Meier
+# --------------------------------------------------
+# Create survival fit object / Cria objeto de ajuste de sobrevivência
+fit <- survfit(
+  Surv(months, event) ~ Gene_Group,  # Survival formula
+                                    # Fórmula de sobrevivência
+  data = data_a                     # Dataset
+)
+
+# Generate Survival Plot / Gerar gráfico de sobrevivência
+# --------------------------------------------------
+p5 <- ggsurvplot(
+  fit,                # Survival fit object
+                     # Objeto de ajuste
+  data = data_a,     # Dataset
+  pval = TRUE,       # Show p-value / Mostra valor-p
+  conf.int = FALSE,  # Hide confidence bands / Oculta faixas de confiança
+  risk.table = TRUE, # Show risk table / Mostra tabela de risco
+  palette = c("#00879E", "#003092"),  # Blue color scheme
+                                     # Esquema de cores azuis
+  xlab = "Time (months)",           # X-axis label
+  ylab = "Survival Probability",    # Y-axis label
+  legend.title = "MET Expression",  # Legend title
+  legend.labs = c("Low", "High"),   # Legend labels
+                                   # Rótulos da legenda
+  
+  # Custom theme settings / Configurações de tema personalizado
+  ggtheme = theme_classic() + 
+    theme(
+      axis.title.x = element_text(size = 14, face = "bold"),  # X-axis title
+      axis.title.y = element_text(size = 14, face = "bold"),  # Y-axis title
+      axis.text.x = element_text(size = 20),  # X-axis text
+      axis.text.y = element_text(size = 20),  # Y-axis text
+      strip.text = element_text(size = 20)    # Facet text (if used)
+                                            # Texto de facetas (se usado)
+    ),
+  
+  # Facet labels (commented out but available)
+  # Rótulos de facetas (comentado mas disponível)
+  panel.labs = list(gender = c("Female", "Male"))  
+)
+
+# Export High-Resolution Plot / Exportar gráfico em alta resolução
+# --------------------------------------------------
+png("survival_curve_MET.png",
+    width = 2500,       # Width / Largura
+    height = 3000,      # Height / Altura
+    units = "px",       # Units / Unidades
+    res = 300,          # Resolution (DPI) / Resolução (DPI)
+    bg = "transparent") # Transparent background / Fundo transparente
+
+print(p5)  # Render plot / Renderiza gráfico
+dev.off()  # Close device / Fecha dispositivo gráfico
+
+# Interpretation Guide / Guia de Interpretação
+# --------------------------------------------------
+# The Kaplan-Meier curve compares survival between:
+# A curva de Kaplan-Meier compara sobrevivência entre:
+# - High MET expression (blue line) / Expressão alta de MET (linha azul)
+# - Low MET expression (teal line) / Expressão baixa de MET (linha verde-azulada)
+# 
+# Key elements / Elementos-chave:
+# 1. P-value: Tests if the difference is statistically significant
+#    Valor-p: Testa se a diferença é estatisticamente significativa
+# 2. Risk table: Shows number at risk over time
+#    Tabela de risco: Mostra número em risco ao longo do tempo
+# 3. Median survival: Where lines cross 50% probability
+#    Sobrevivência mediana: Onde as linhas cruzam 50% de probabilidade
